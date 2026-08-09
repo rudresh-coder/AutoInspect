@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from rq import Retry
 from sqlalchemy.orm import Session
 
 from backend.app.core.database import get_db
@@ -36,6 +37,7 @@ def upload_image(
     image_processing_queue.enqueue(
         process_image,
         image_record.id,
+        retry=Retry(max=2, interval=[5, 15]),
     )
 
     return ImageUploadResponse(
