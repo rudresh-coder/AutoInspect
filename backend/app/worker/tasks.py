@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from backend.app.analysis.pipeline import run_analysis
 from backend.app.core.database import SessionLocal
 from backend.app.models.image import Image
 
@@ -13,7 +14,9 @@ def process_image(processing_id: str) -> None:
         image = db.get(Image, processing_id)
 
         if image is None:
-            return
+            raise ValueError(
+                f"Image {processing_id} was not found"
+            )
 
         image.status = "processing"
         image.processing_started_at = datetime.now(timezone.utc)
@@ -21,8 +24,11 @@ def process_image(processing_id: str) -> None:
 
         db.commit()
 
-        # Actual image analysis will be added in later phases.
-        # This task currently verifies the asynchronous pipeline.
+        # Run the actual analysis pipeline.
+        run_analysis(
+            db=db,
+            image=image,
+        )
 
         image.status = "completed"
         image.processing_completed_at = datetime.now(timezone.utc)
