@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.schemas.image import ImageUploadResponse
 from backend.app.services.image_service import create_image_record
+from backend.app.worker.queue import image_processing_queue
+from backend.app.worker.tasks import process_image
 
 
 router = APIRouter(
@@ -24,6 +26,11 @@ def upload_image(
     image_record = create_image_record(
         db=db,
         upload=image,
+    )
+
+    image_processing_queue.enqueue(
+        process_image,
+        image_record.id,
     )
 
     return ImageUploadResponse(
