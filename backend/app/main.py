@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from backend.app.core.config import settings
-from backend.app.core.database import engine
-
 import redis
+
+from backend.app.api.images import router as images_router
+from backend.app.core.config import settings
+from backend.app.core.database import Base, engine
+from backend.app.models.image import Image
 
 
 app = FastAPI(
@@ -12,6 +14,14 @@ app = FastAPI(
     description="Explainable asynchronous vehicle image analysis pipeline",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+def create_tables():
+    Base.metadata.create_all(bind=engine)
+
+
+app.include_router(images_router)
 
 
 @app.get("/")
