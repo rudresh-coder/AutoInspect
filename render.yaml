@@ -51,6 +51,9 @@ services:
     name: autoinspect-redis
     region: singapore
     plan: free
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow Redis connections
 
 databases:
   - name: autoinspect-db
