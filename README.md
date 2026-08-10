@@ -32,7 +32,7 @@ The goal is not to guarantee perfect computer-vision accuracy. Instead, the syst
 - Vehicle image upload
 - JPEG, PNG, and WebP validation
 - Unique processing ID generation
-- Local image storage
+- Cloudflare R2 object storage
 - Image metadata persistence
 - Asynchronous background processing
 - Redis-backed RQ job queue
@@ -49,10 +49,10 @@ The goal is not to guarantee perfect computer-vision accuracy. Instead, the syst
 - Explainable processing results
 - Processing status tracking
 - Failure reason reporting
+- Bounded background-job retries
 - Frontend processing timeline
-- Failed-upload recovery
 - Responsive React frontend
-
+- Production deployment
 ---
 
 # 3. System Architecture
@@ -76,17 +76,16 @@ AutoInspect uses a client-server architecture with asynchronous background proce
                          │ Upload Endpoint     │
                          │ Status Endpoint     │
                          │ Validation          │
-                         └──────────┬──────────┘
-                                    │
-                      ┌─────────────┴─────────────┐
-                      │                           │
-                      ▼                           ▼
-              ┌───────────────┐          ┌───────────────┐
-              │  PostgreSQL   │          │     Redis     │
-              │               │          │               │
-              │ Image records │          │ RQ Queue      │
-              │ Analysis data │          │ Job state     │
-              └───────────────┘          └───────┬───────┘
+                         └──────┬───────┬──────┘
+                                │       │
+                         ┌──────┘       └──────────┐
+                         ▼                         ▼
+                ┌───────────────┐          ┌───────────────┐
+                │  PostgreSQL   │          │     Redis     │
+                │               │          │               │
+                │ Image records │          │ RQ Queue      │
+                │ Analysis data │          │ Job state      │
+                └───────────────┘          └───────┬───────┘
                                                   │
                                                   ▼
                                       ┌─────────────────────┐
@@ -98,17 +97,22 @@ AutoInspect uses a client-server architecture with asynchronous background proce
                                       │ Duplicate Analysis  │
                                       └──────────┬──────────┘
                                                  │
+                                                 │ Download image
                                                  ▼
                                       ┌─────────────────────┐
-                                      │ Analysis Result     │
+                                      │    Cloudflare R2    │
                                       │                     │
-                                      │ Quality             │
-                                      │ OCR                 │
-                                      │ Duplicates          │
-                                      │ Explanation         │
+                                      │ Persistent Images   │
                                       └─────────────────────┘
-
----
+                                                 │
+                                                 │ Analysis results
+                                                 ▼
+                                      ┌─────────────────────┐
+                                      │     PostgreSQL      │
+                                      │                     │
+                                      │ Analysis Results    │
+                                      │ Processing Status    │
+                                      └─────────────────────┘
 
 ```
 
@@ -130,8 +134,8 @@ FastAPI
  ├── Validate image type
  ├── Validate image readability
  ├── Generate processing ID
- ├── Store image
- ├── Store metadata
+ ├── Store image in Cloudflare R2
+ ├── Store metadata in PostgreSQL
  └── Enqueue background job
           │
           ▼
@@ -140,6 +144,7 @@ FastAPI
           ▼
        RQ Worker
           │
+          ├── Download image from R2
           ├── Quality Analysis
           ├── Plate Detection
           ├── OCR
@@ -150,6 +155,7 @@ FastAPI
           ▼
        PostgreSQL
           │
+          │ Store analysis results
           ▼
 React Frontend
  │
@@ -157,7 +163,6 @@ React Frontend
  ▼
 Inspection Report
 ```
-
 ---
 
 # 5. Processing Flow
@@ -222,16 +227,14 @@ The frontend periodically requests the processing-status endpoint until the proc
 
 # 7. Queue Strategy
 
-Redis is used as the queue backend and RQ is used to manage background jobs.
+Redis is used as the queue backend and RQ manages the background jobs.
 
-The FastAPI application does not perform the complete image-analysis workload during the upload request.
-
-Instead:
+The FastAPI application enqueues image-processing jobs instead of performing the complete analysis during the upload request.
 
 ```text
 FastAPI
    │
-   │ enqueue job
+   │ Enqueue job
    ▼
 Redis
    │
@@ -242,73 +245,43 @@ RQ Worker
 Image Processing
 ```
 
-This separation provides several benefits:
-
-- The upload API responds quickly.
-- CPU-intensive processing does not block HTTP requests.
-- Processing can be handled independently by workers.
-- The architecture can be extended to multiple workers.
-- Queue-based processing provides a foundation for scaling.
-
-The current implementation uses the `image-processing` queue.
-
 # 8. Major Design Decisions
 
 ## FastAPI
 
-FastAPI was selected for the backend because it provides:
+FastAPI was selected for:
 
 - Clear API definitions
 - Automatic OpenAPI documentation
 - Request validation
-- Good support for asynchronous/background-oriented applications
-- Straightforward integration with Python image-processing libraries
-
----
+- Easy integration with Python image-processing libraries
 
 ## PostgreSQL
 
-PostgreSQL is used for persistent application data.
-
-It stores image metadata and analysis information so that processing results remain available after the background job finishes.
-
----
+PostgreSQL stores image metadata, processing status, and analysis results so results remain available after background processing.
 
 ## Redis + RQ
 
-Redis and RQ were selected for asynchronous job processing.
+Redis and RQ provide the asynchronous job-processing architecture.
 
-The main reason for this choice was simplicity while still demonstrating a real queue-based architecture.
+The API returns a processing ID immediately, while the RQ worker processes images independently from the upload request.
 
-The assignment allows different queue technologies and emphasizes engineering reasoning over a specific technology choice.
+## Cloudflare R2 Object Storage
 
----
+Cloudflare R2 is used for persistent image storage.
 
-## Local File Storage
+The database stores the R2 object key rather than relying on local filesystem storage.
 
-Uploaded images are currently stored locally.
+During processing, the worker temporarily downloads the image from R2, runs the analysis, and removes the temporary file afterward.
 
-This keeps the implementation simple and appropriate for a take-home assignment.
+This allows persistent image storage to remain separate from application compute.
 
-A production deployment could replace local storage with an object-storage system such as Amazon S3 or another cloud storage service.
-
----
-
-## Polling for Processing Status
+## HTTP Polling
 
 The frontend polls:
 
 ```text
 GET /api/v1/images/{processing_id}
-```
-
-while processing is active.
-
-Polling was chosen because it is simple to implement and sufficient for the current scale.
-
-A production system with large numbers of concurrent users could use WebSockets or Server-Sent Events for more efficient real-time status updates.
-
----
 
 # 9. Results API
 
@@ -518,7 +491,7 @@ Image Upload
 
 # 12. Error Handling
 
-The system handles invalid requests, invalid image files, unknown processing IDs, and background-processing failures using structured error responses.
+The system handles invalid requests, unsupported or invalid image files, unknown processing IDs, and background-processing failures using structured error responses.
 
 ## Unsupported Image Type
 
@@ -539,27 +512,22 @@ Uploading an unsupported file type returns:
 
 # 13. Persistence
 
-The application uses PostgreSQL to persist image processing information.
+AutoInspect uses PostgreSQL to persist image-processing metadata and analysis results.
 
 Stored information includes:
 
 - Processing ID
-- Filename
-- File size
+- Filename and file size
 - Image dimensions
-- Processing status
-- Creation timestamp
-- Updated timestamp
-- Processing start timestamp
-- Processing completion timestamp
-- Error message
+- Processing status and timestamps
+- Error information
 - Analysis results
 
-The database allows the application to retrieve processing results after the background job has completed.
+Uploaded images are stored in **Cloudflare R2**, while metadata and analysis results are stored in **PostgreSQL**.
 
-Image files themselves are currently stored locally, while their metadata and analysis results are persisted in PostgreSQL.
+The processing ID links the uploaded image, R2 object, background-processing job, database record, and frontend status requests.
 
-The processing ID acts as the identifier connecting the uploaded image, background-processing job, database record, and frontend status requests.
+During processing, the RQ worker temporarily downloads the image from R2, performs the analysis, and removes the temporary file afterward.
 
 ---
 
@@ -569,35 +537,66 @@ The processing ID acts as the identifier connecting the uploaded image, backgrou
 AutoInspect/
 │
 ├── backend/
-│   └── app/
-│       ├── api/
-│       ├── analysis/
-│       ├── core/
-│       ├── models/
-│       ├── schemas/
-│       ├── services/
-│       └── worker/
+│   ├── app/
+│   │   ├── api/
+│   │   │   └── images.py
+│   │   │
+│   │   ├── analysis/
+│   │   │   ├── ocr.py
+│   │   │   ├── pipeline.py
+│   │   │   └── quality.py
+│   │   │
+│   │   ├── core/
+│   │   │   ├── config.py
+│   │   │   └── database.py
+│   │   │
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   ├── services/
+│   │   │   ├── image_service.py
+│   │   │   └── storage.py
+│   │   │
+│   │   ├── worker/
+│   │   │   ├── queue.py
+│   │   │   ├── run_worker.py
+│   │   │   └── tasks.py
+│   │   │
+│   │   └── main.py
+│   │
+│   ├── constraints.txt
+│   ├── requirements.txt
+│   └── ...
 │
 ├── frontend/
-│   └── src/
-│       ├── api/
-│       ├── components/
-│       ├── hooks/
-│       ├── App.jsx
-│       ├── App.css
-│       └── PipelineTimeline.jsx
+│   ├── src/
+│   │   ├── api/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── App.jsx
+│   │   ├── App.css
+│   │   └── PipelineTimeline.jsx
+│   │
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── vite.config.js
+│   └── ...
 │
-├── sample_images/
-├── uploads/
 ├── tests/
 │   ├── conftest.py
 │   └── test_api.py
-├── docker-compose.yml
+│
+├── sample_images/
+├── uploads/
+│
+├── alembic/
 ├── alembic.ini
+├── docker-compose.yml
+├── render.yaml
+├── start.sh
 ├── .env.example
+├── .gitignore
 └── README.md
 ```
-
 ---
 
 # 15. Running Instructions
@@ -722,54 +721,71 @@ Terminal 4
 
 Once all four components are running, open the frontend in the browser and upload a supported vehicle image.
 
+## Deployment Note
+
+The frontend and FastAPI backend are deployed separately, while image processing is handled by an RQ worker.
+
+Because the image-analysis workload is CPU/memory intensive, the background worker is currently run locally on the developer's machine rather than as a continuously running cloud worker. The deployed backend stores uploaded images in Cloudflare R2 and places processing jobs in Redis. The local RQ worker consumes these jobs, downloads the image from R2, performs the analysis, and saves the results to PostgreSQL.
+
+Therefore, for the deployed application to process new images, the RQ worker must be running locally:
+
+```bash
+python -m backend.app.worker.run_worker
+```
+The worker must remain running while images are being processed.
+
+
+### Also add the actual problem/solution
+
+Since this was an important engineering decision, I recommend adding a very short section after it:
+
+```markdown
+## Deployment Resource Constraint
+
+During deployment, running the image-processing worker in the cloud introduced memory/resource limitations because image analysis and OCR are CPU/memory intensive.
+
+Instead of increasing the deployment resources, the architecture was adjusted to separate API hosting from background processing. Cloudflare R2 provides persistent image storage, Redis provides the job queue, and the worker can process jobs independently.
+
+This allowed the deployed API and frontend to remain lightweight while the heavier image-processing workload is handled by the worker.
+
 # 16. Environment Configuration
 
-The application uses environment variables for runtime configuration.
+AutoInspect uses environment variables for database, Redis, and Cloudflare R2 configuration.
 
 Create a `.env` file in the project root based on `.env.example`.
 
-The environment configuration contains values required for connecting the application to its dependencies, including:
-
-- PostgreSQL database configuration
-- Redis connection configuration
-- Application configuration
-
-Example structure:
+Example:
 
 ```env
 DATABASE_URL=your_database_connection_string
 REDIS_URL=your_redis_connection_string
+
+R2_ENDPOINT_URL=your_r2_endpoint_url
+R2_ACCESS_KEY_ID=your_r2_access_key_id
+R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
+R2_BUCKET_NAME=your_r2_bucket_name
 ```
-
-Environment-specific values should be stored in environment variables rather than hard-coded into source code.
-
-Secrets, passwords, API keys, and private credentials must not be committed to Git.
-
-The `.env.example` file should contain only safe placeholder values and should be committed to the repository as a configuration reference.
-
 
 # 17. Testing
 
 AutoInspect includes automated API tests using `pytest` and FastAPI's `TestClient`.
 
-The tests use an isolated in-memory SQLite database and mock the background queue so that API behavior can be tested without requiring PostgreSQL, Redis, or an active RQ worker.
+Tests use an isolated SQLite database and mock the background queue, allowing API behavior to be tested without PostgreSQL, Redis, or an active RQ worker.
 
-## Automated Test Coverage
+## Test Coverage
 
 The test suite covers:
 
-- Valid JPEG image upload
-- Valid PNG image upload
-- Valid WebP image upload
-- Unique processing ID generation
-- Processing status retrieval after upload
-- Uploaded image metadata persistence
-- Unsupported file type validation
-- Invalid image content validation
-- Missing image field validation
-- Unknown processing ID handling
+- JPEG, PNG, and WebP uploads
+- Processing ID generation
+- Processing status retrieval
+- Image metadata persistence
+- Unsupported file types
+- Invalid image content
+- Missing image field
+- Unknown processing IDs
 
-## Running the Tests
+## Running Tests
 
 From the project root:
 
@@ -780,53 +796,26 @@ pytest -v
 
 # 18. AI Usage Disclosure
 
-AI tools were used during development as engineering assistants.
+AI tools were used during development as engineering assistants for architecture discussions, debugging, error analysis, documentation, and implementation guidance.
 
 ## Where AI Was Used
 
 AI assistance was used for:
 
-- Discussing architecture options
-- Debugging implementation issues
-- Reviewing API behavior
-- Designing frontend interaction patterns
-- Explaining errors and logs
-- Suggesting implementation approaches
-- Reviewing edge cases
-- Improving documentation
-- Helping reason about trade-offs
+- Architecture and implementation discussions
+- Debugging API, frontend, Redis/RQ, and deployment issues
+- Reviewing errors and logs
+- Frontend interaction and processing-state design
+- Reviewing edge cases and error handling
+- Documentation and engineering trade-offs
 
-AI was used as an assistant rather than as an unquestioned source of implementation.
+AI-generated suggestions were reviewed and adapted to match the actual project implementation.
 
+## AI Limitations
 
-## What AI Helped With
+AI suggestions were not always correct and sometimes required correction based on the actual project structure, API behavior, runtime logs, and deployment environment.
 
-AI assistance was particularly useful for:
-
-- Reasoning about asynchronous image processing
-- Understanding Redis/RQ worker behavior
-- Debugging frontend-to-backend communication
-- Identifying CORS issues
-- Designing processing-state handling
-- Reviewing error handling
-- Structuring the frontend processing timeline
-- Thinking through duplicate-detection behavior
-- Reviewing API and architecture documentation
-
-
-## Where AI Output Was Wrong
-
-AI-generated suggestions were not always correct.
-
-Examples encountered during development included:
-
-- Incorrect assumptions about the location of frontend components
-- Suggestions that did not match the current project structure
-- Incorrect assumptions about frontend/backend processing stages
-- Suggestions that required adjustment to match the actual API behavior
-- OCR-related expectations that did not always match real image results
-
-For example, the backend exposes overall states such as:
+For example, the frontend's five-stage processing timeline is a UI representation, while the backend exposes overall states such as:
 
 ```text
 pending
@@ -835,82 +824,51 @@ completed
 failed
 ```
 
-rather than individual API states for every visual pipeline stage.
-
-Therefore, the frontend pipeline visualization was treated as a UI representation rather than falsely claiming that the backend provides real-time stage telemetry.
-
-
-## How AI-Generated Code Was Validated
-
-AI-generated code was validated through:
-
-1. Running the application locally.
-2. Testing API endpoints through Swagger.
-3. Testing image uploads with valid and invalid files.
-4. Checking FastAPI logs.
-5. Checking RQ worker logs.
-6. Checking PostgreSQL persistence.
-7. Testing frontend behavior in the browser.
-8. Testing duplicate detection using repeated images.
-9. Testing different images.
-10. Testing failure and recovery behavior.
-11. Testing responsive layouts.
-
-Code was accepted only after its behavior matched the actual system requirements and observed runtime behavior.
-
-
 # 19. Engineering Trade-offs
 
-## Intentional Simplifications
+### Cloud Object Storage
+Cloudflare R2 is used for persistent image storage instead of local storage. This improves reliability for the deployed API and background worker, but adds external storage configuration.
 
-The project intentionally avoids several production-level complexities to keep the implementation focused.
+### Asynchronous Processing
+Redis and RQ are used to process images in the background instead of blocking the upload request. This improves responsiveness but adds worker and queue infrastructure.
 
-### Local Image Storage
-
-Images are currently stored locally instead of using cloud object storage.
-
-This keeps the development environment simple and appropriate for a take-home assignment.
-
-### Polling
-
-The frontend uses HTTP polling to retrieve processing status instead of WebSockets or Server-Sent Events.
-
-This is sufficient for the current scale and keeps the architecture straightforward.
+### HTTP Polling
+The frontend uses HTTP polling for processing-status updates instead of WebSockets or SSE. This keeps the implementation simple but requires repeated status requests.
 
 ### CPU Processing
+Image analysis runs on CPU to avoid GPU infrastructure and additional cost. The trade-off is slower processing for computationally intensive workloads.
 
-The current development environment can perform image processing on CPU.
-
-GPU acceleration was not required for demonstrating the architecture.
+### Bounded Retries
+RQ jobs use bounded retries with progressive intervals (10, 30, and 60 seconds). This improves reliability while preventing indefinite retries.
 
 ### Limited Processing States
+The backend exposes overall processing status, while the frontend presents the workflow through a five-stage pipeline. This simplifies the API while still providing visual progress.
 
-The backend exposes overall processing states rather than individual states for every analysis component.
-
-The frontend provides a visual five-stage representation of the conceptual analysis pipeline.
+### Single Worker
+The current deployment uses a single RQ worker, which is sufficient for the current scale but limits concurrent processing. Horizontal worker scaling can be added later.
 
 # 20. Improvements With More Time
 
-With additional development time, the following improvements would be considered:
+With additional development time, the following improvements could be considered:
 
 - More accurate license-plate detection
-- Improved OCR preprocessing
-- Better Indian number plate format validation
-- More robust screenshot/photo-of-photo detection
-- Image tampering detection
-- GPU acceleration
-- Object storage instead of local storage
-- WebSocket/SSE-based processing updates
+- Improved OCR preprocessing and recognition accuracy
+- Better Indian number-plate format validation
+- More robust screenshot and photo-of-photo detection
+- Advanced image tampering and manipulation detection
+- GPU acceleration for faster image processing
+- WebSocket/SSE-based real-time processing updates
 - Authentication and authorization
-- Analysis history
-- Batch processing
-- Expanded integration and end-to-end tests
-- More sophisticated retry classification and dead-letter queue handling
-- Monitoring and observability
-- Production deployment
-- Rate limiting
-- API authentication
-- Horizontal worker scaling
+- Analysis history and user-specific inspection records
+- Batch image processing
+- Expanded integration and end-to-end test coverage
+- More sophisticated retry classification
+- Dead-letter queue handling for permanently failed jobs
+- Advanced monitoring, alerting, and distributed tracing
+- Rate limiting and additional API security controls
+- Horizontal scaling of background workers
+- Improved idempotency and duplicate-job handling
+- More comprehensive validation using larger and more diverse real-world vehicle image datasets
 
 # 21. Scalability Concerns
 
@@ -932,44 +890,23 @@ Multiple RQ workers could consume jobs from the processing queue concurrently.
 
 # 22. Failure Handling Concerns
 
-Potential production failure cases include:
+Potential failures include:
 
-- Worker crashes
-- Redis unavailability
-- Database unavailability
-- Corrupted image files
-- OCR failure
-- Model inference failure
+- Worker, Redis, or database failures
+- Corrupted or invalid images
+- OCR or analysis failures
+- Queue backlog or duplicate jobs
 - Large image uploads
-- Queue backlog
-- Duplicate jobs
-- Partial processing
 
-The current implementation handles important application-level failures and exposes a `failed` processing state with an associated failure reason.
+The application records failures using the `failed` processing state and error information.
 
-The current implementation uses RQ's built-in retry mechanism for background image-processing jobs.
-
-Jobs are configured with bounded retries and progressive retry intervals:
+RQ uses bounded retries with progressive intervals:
 
 - Maximum retries: 3
-- Retry interval 1: 10 seconds
-- Retry interval 2: 30 seconds
-- Retry interval 3: 60 seconds
+- Intervals: 10, 30, and 60 seconds
+- Maximum attempts: 4
 
-This results in a maximum of four processing attempts, including the initial attempt.
-
-The RQ worker runs with the scheduler enabled so delayed retries can be processed correctly.
-
-The worker re-raises processing exceptions after recording the failure information, allowing RQ to recognize the job as failed and apply its retry policy.
-
-Further production improvements could include:
-
-- Dead-letter queue handling
-- Worker health monitoring
-- Idempotent processing
-- Structured logging
-- Alerting
-- Distributed tracing
+The deployed system uses Redis, PostgreSQL, and Cloudflare R2. Future hardening could include dead-letter queues, worker monitoring, alerting, and distributed tracing.
 
 # 23. Assumptions
 
@@ -977,12 +914,12 @@ The following assumptions were made during implementation:
 
 1. Vehicle images are uploaded through the API as multipart form data.
 2. Only JPEG, PNG, and WebP images are supported.
-3. Uploaded images can initially be stored locally.
+3. Uploaded images are persisted in configured object storage such as Cloudflare R2, while temporary local files may be used during analysis.
 4. Image processing may take several seconds and therefore must not block the upload request.
 5. OCR output is probabilistic and therefore must include confidence information.
 6. A matching SHA-256 hash indicates an exact duplicate file.
 7. Perceptual similarity is useful for identifying visually similar images even when their file contents differ.
-8. The current system is intended as a take-home engineering demonstration rather than a production-scale deployment.
+8. The current system is deployed and demonstrates an end-to-end production-like architecture, but it is not intended to be a certified or production-grade vehicle-inspection system.
 9. Perfect ML accuracy is not assumed.
 10. Analysis results should communicate uncertainty instead of presenting uncertain predictions as guaranteed facts.
 
@@ -1009,10 +946,27 @@ AutoInspect includes the following additional capabilities:
 - Bounded background-job retries
 - Progressive retry backoff
 - RQ scheduler support for delayed retries
-These automated tests are part of the current implementation, not a future improvement.
+- **Full production deployment of the application**
+- **Deployed React frontend**
+- **Deployed FastAPI backend**
+- **Production PostgreSQL database**
+- **Production Redis queue for background processing**
+- **Cloudflare R2 integration for persistent image storage**
+- **Production background image-processing workflow using RQ**
 
-Additional production-grade capabilities such as rate limiting, authentication, advanced observability, and production deployment remain future improvements.
+These automated tests and deployment capabilities are part of the current implementation, not future improvements.
 
+## Production Deployment
+
+AutoInspect has been deployed as a working production application.
+
+### Frontend
+
+The React + Vite frontend is deployed as a Render Static Site:
+
+```text
+https://autoinspect-frontend.onrender.com
+```
 # 25. Design Philosophy
 
 The assignment emphasizes thoughtful engineering over unnecessary complexity.
@@ -1037,27 +991,26 @@ The processing pipeline is presented visually to communicate the underlying arch
 
 # 26. Limitations
 
-The system should not be considered a production-grade vehicle-inspection or legal number-plate verification system.
+AutoInspect is a prototype automated inspection system and should not be considered a certified vehicle-inspection or legal number-plate verification system.
 
-OCR accuracy depends on the quality and characteristics of the input image.
+Key limitations include:
 
-Possible limitations include:
-
-- Incorrect OCR
-- Missed plate detection
-- False duplicate matches
-- False negative duplicate detection
-- Sensitivity to image quality
-- CPU processing time
+- OCR and plate-detection errors
+- False duplicate matches or missed duplicates
+- Sensitivity to image quality and viewing conditions
+- CPU-based processing time
 - Limited tampering detection
 - Limited vehicle-specific validation
+- Processing delays under heavy worker load
 
-The analysis results should therefore be interpreted as automated inspection signals rather than absolute ground truth.
+Results should therefore be treated as automated inspection signals rather than absolute ground truth.
 
 # 27. Conclusion
 
-AutoInspect demonstrates an asynchronous image-processing architecture that combines REST APIs, background jobs, persistent storage, image analysis, OCR, duplicate detection, confidence scoring, and explainable results.
+AutoInspect is an asynchronous image-processing system combining REST APIs, Redis/RQ background jobs, PostgreSQL, Cloudflare R2, image analysis, OCR, and duplicate detection.
 
-The implementation focuses on engineering judgment and reliability rather than attempting to solve every computer-vision problem perfectly.
+The project is deployed with a React + Vite frontend and FastAPI backend, providing an end-to-end workflow from image upload to inspection results.
 
-The architecture can be extended toward a production system by introducing scalable object storage, multiple workers, stronger computer-vision models, broader integration and end-to-end testing, observability, stronger retry policies, authentication, and real-time processing updates.
+The system is functional but remains a prototype rather than a certified vehicle-inspection or legal number-plate verification system.
+
+Future improvements include better OCR and detection accuracy, worker scaling, authentication, rate limiting, advanced monitoring, real-time updates, and broader real-world testing.
