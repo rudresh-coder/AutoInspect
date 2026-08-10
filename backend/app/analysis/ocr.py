@@ -30,10 +30,19 @@ class OCRResult:
     plate_reason: str
 
 
-_reader = easyocr.Reader(
-    ["en"],
-    gpu=False,
-)
+_reader = None
+
+
+def get_reader():
+    global _reader
+
+    if _reader is None:
+        _reader = easyocr.Reader(
+            ["en"],
+            gpu=False,
+        )
+
+    return _reader
 
 
 # ---------------------------------------------------------
@@ -237,38 +246,48 @@ def _score_plate_candidate(
 # ---------------------------------------------------------
 
 def _create_ocr_variants(image_path: str) -> list[np.ndarray]:
-
     image = cv2.imread(image_path)
 
     if image is None:
         raise ValueError("Unable to read image")
 
-    variants = []
-
-    # Original
-    variants.append(image)
-
-    # -----------------------------------------------------
-    # Upscaled image
-    # -----------------------------------------------------
+    # Keep OCR processing memory bounded.
+    max_dimension = 1600
 
     height, width = image.shape[:2]
 
-    scale = 2.0
+    if max(height, width) > max_dimension:
+        scale = max_dimension / max(height, width)
+
+        image = cv2.resize(
+            image,
+            (
+                int(width * scale),
+                int(height * scale),
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    variants = [image]
+
+    # Create only one additional enhanced variant.
+    height, width = image.shape[:2]
+
+    scale = 1.5
 
     upscaled = cv2.resize(
         image,
-        (int(width * scale), int(height * scale)),
+        (
+            int(width * scale),
+            int(height * scale),
+        ),
         interpolation=cv2.INTER_CUBIC,
     )
 
-    variants.append(upscaled)
-
-    # -----------------------------------------------------
-    # Grayscale + CLAHE
-    # -----------------------------------------------------
-
-    gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(
+        upscaled,
+        cv2.COLOR_BGR2GRAY,
+    )
 
     clahe = cv2.createCLAHE(
         clipLimit=2.0,
@@ -284,27 +303,6 @@ def _create_ocr_variants(image_path: str) -> list[np.ndarray]:
 
     variants.append(enhanced)
 
-    # -----------------------------------------------------
-    # Sharpened
-    # -----------------------------------------------------
-
-    kernel = np.array(
-        [
-            [0, -1, 0],
-            [-1, 5, -1],
-            [0, -1, 0],
-        ],
-        dtype=np.float32,
-    )
-
-    sharpened = cv2.filter2D(
-        upscaled,
-        -1,
-        kernel,
-    )
-
-    variants.append(sharpened)
-
     return variants
 
 
@@ -313,6 +311,8 @@ def _create_ocr_variants(image_path: str) -> list[np.ndarray]:
 # ---------------------------------------------------------
 
 def extract_text(image_path: str) -> OCRResult:
+
+    reader = get_reader()
 
     variants = _create_ocr_variants(image_path)
 
@@ -325,7 +325,7 @@ def extract_text(image_path: str) -> OCRResult:
 
     for variant_index, image in enumerate(variants):
 
-        results = _reader.readtext(
+        results = reader.readtext(
             image,
             allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
             detail=1,
