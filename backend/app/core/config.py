@@ -9,6 +9,26 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
 
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        url = self.database_url
+
+        if url.startswith("postgres://"):
+            url = url.replace(
+                "postgres://",
+                "postgresql+psycopg://",
+                1,
+            )
+
+        elif url.startswith("postgresql://"):
+            url = url.replace(
+                "postgresql://",
+                "postgresql+psycopg://",
+                1,
+            )
+
+        return url
+
     upload_dir: str = "./uploads"
     max_file_size_mb: int = 10
 
