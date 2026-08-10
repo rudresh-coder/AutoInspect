@@ -747,39 +747,32 @@ The `.env.example` file should contain only safe placeholder values and should b
 
 # 17. Testing
 
-The system was manually tested against the following scenarios.
+AutoInspect includes automated API tests using `pytest` and FastAPI's `TestClient`.
 
-## Valid Image
+The tests use an isolated in-memory SQLite database and mock the background queue so that API behavior can be tested without requiring PostgreSQL, Redis, or an active RQ worker.
 
-A real vehicle image successfully reaches the `completed` state and produces an inspection report.
+## Automated Test Coverage
 
-## Exact Duplicate
+The test suite covers:
 
-Uploading the same image again correctly identifies an exact duplicate using the image hash.
+- Valid JPEG image upload
+- Valid PNG image upload
+- Valid WebP image upload
+- Unique processing ID generation
+- Processing status retrieval after upload
+- Uploaded image metadata persistence
+- Unsupported file type validation
+- Invalid image content validation
+- Missing image field validation
+- Unknown processing ID handling
 
-## Different Image
+## Running the Tests
 
-Uploading a different vehicle image produces a different similarity result and does not incorrectly classify it as an exact duplicate.
+From the project root:
 
-## Invalid Image
-
-A fake or corrupted `.jpg` file is rejected with an appropriate validation error.
-
-## Unknown Processing ID
-
-Requesting an unknown processing ID returns:
-
-```text
-404 Not Found
+```bash
+pytest -v
 ```
-
-## Failure Recovery
-
-The frontend displays the failure reason and allows the user to return to the upload state using the retry action.
-
-## Responsive UI
-
-The frontend was tested across desktop, tablet, and mobile viewport sizes.
 
 
 # 18. AI Usage Disclosure
@@ -927,7 +920,7 @@ For a larger production system, the following areas would require attention.
 
 Multiple RQ workers could consume jobs from the processing queue concurrently.
 
-```text
+
                  Redis Queue
                      │
            ┌──────────┼──────────┐
@@ -982,7 +975,7 @@ The following assumptions were made during implementation:
 
 The assignment lists several optional bonus areas.
 
-AutoInspect includes some of these ideas:
+AutoInspect includes the following additional capabilities:
 
 - Dashboard-style inspection UI
 - Confidence scoring
@@ -991,8 +984,15 @@ AutoInspect includes some of these ideas:
 - Structured logging through application and worker logs
 - Performance observation of asynchronous processing
 - Responsive UI
+- Automated API tests using pytest
+- Isolated test database
+- Mocked background queue during API testing
+- Validation tests for supported and unsupported image formats
+- Invalid image validation tests
+- Processing ID and status endpoint tests
+- Metadata persistence tests
 
-Additional production-grade bonus capabilities such as automated tests, rate limiting, deployment, and advanced observability are identified as future improvements rather than being presented as completed features.
+Additional production-grade capabilities such as rate limiting, authentication, advanced observability, and production deployment remain future improvements.
 
 # 25. Design Philosophy
 
