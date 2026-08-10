@@ -589,6 +589,9 @@ AutoInspect/
 │
 ├── sample_images/
 ├── uploads/
+├── tests/
+│   ├── conftest.py
+│   └── test_api.py
 ├── docker-compose.yml
 ├── alembic.ini
 ├── .env.example
@@ -886,7 +889,6 @@ The backend exposes overall processing states rather than individual states for 
 
 The frontend provides a visual five-stage representation of the conceptual analysis pipeline.
 
-````markdown
 # 20. Improvements With More Time
 
 With additional development time, the following improvements would be considered:
@@ -902,8 +904,8 @@ With additional development time, the following improvements would be considered
 - Authentication and authorization
 - Analysis history
 - Batch processing
-- Automated integration tests
-- Improved retry policies
+- Expanded integration and end-to-end tests
+- More sophisticated retry classification and dead-letter queue handling
 - Monitoring and observability
 - Production deployment
 - Rate limiting
@@ -922,7 +924,7 @@ Multiple RQ workers could consume jobs from the processing queue concurrently.
 
 
                  Redis Queue
-                     │
+                      │
            ┌──────────┼──────────┐
            ▼          ▼          ▼
         Worker 1   Worker 2   Worker 3
@@ -945,11 +947,24 @@ Potential production failure cases include:
 
 The current implementation handles important application-level failures and exposes a `failed` processing state with an associated failure reason.
 
+The current implementation uses RQ's built-in retry mechanism for background image-processing jobs.
+
+Jobs are configured with bounded retries and progressive retry intervals:
+
+- Maximum retries: 3
+- Retry interval 1: 10 seconds
+- Retry interval 2: 30 seconds
+- Retry interval 3: 60 seconds
+
+This results in a maximum of four processing attempts, including the initial attempt.
+
+The RQ worker runs with the scheduler enabled so delayed retries can be processed correctly.
+
+The worker re-raises processing exceptions after recording the failure information, allowing RQ to recognize the job as failed and apply its retry policy.
+
 Further production improvements could include:
 
-- Automatic job retries
-- Retry backoff
-- Dead-letter queues
+- Dead-letter queue handling
 - Worker health monitoring
 - Idempotent processing
 - Structured logging
@@ -991,6 +1006,10 @@ AutoInspect includes the following additional capabilities:
 - Invalid image validation tests
 - Processing ID and status endpoint tests
 - Metadata persistence tests
+- Bounded background-job retries
+- Progressive retry backoff
+- RQ scheduler support for delayed retries
+These automated tests are part of the current implementation, not a future improvement.
 
 Additional production-grade capabilities such as rate limiting, authentication, advanced observability, and production deployment remain future improvements.
 
@@ -1009,6 +1028,8 @@ AutoInspect therefore prioritizes:
 - Simple and understandable infrastructure
 - Practical trade-offs
 - Debuggability
+- Bounded and recoverable background processing
+- Controlled retry behavior
 
 The frontend intentionally uses a restrained visual design rather than relying on excessive colors or decorative effects.
 
@@ -1039,4 +1060,4 @@ AutoInspect demonstrates an asynchronous image-processing architecture that comb
 
 The implementation focuses on engineering judgment and reliability rather than attempting to solve every computer-vision problem perfectly.
 
-The architecture can be extended toward a production system by introducing scalable object storage, multiple workers, stronger computer-vision models, automated testing, observability, retries, authentication, and real-time processing updates.
+The architecture can be extended toward a production system by introducing scalable object storage, multiple workers, stronger computer-vision models, broader integration and end-to-end testing, observability, stronger retry policies, authentication, and real-time processing updates.

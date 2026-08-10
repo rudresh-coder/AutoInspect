@@ -37,7 +37,7 @@ def upload_image(
     image_processing_queue.enqueue(
         process_image,
         image_record.id,
-        retry=Retry(max=2, interval=[5, 15]),
+        Retry(max=3, interval=[10, 30, 60])
     )
 
     return ImageUploadResponse(
