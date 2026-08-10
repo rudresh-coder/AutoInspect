@@ -1,0 +1,58 @@
+services:
+  - type: web
+    name: autoinspect-api
+    runtime: python
+    plan: free
+    region: singapore
+
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: bash start.sh
+
+    healthCheckPath: /health
+
+    envVars:
+      - key: APP_NAME
+        value: AutoInspect
+
+      - key: APP_ENV
+        value: production
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autoinspect-db
+          property: connectionString
+
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: autoinspect-redis
+          property: connectionString
+
+      - key: FRONTEND_URL
+        sync: false
+
+      - key: UPLOAD_DIR
+        value: ./uploads
+
+      - key: MAX_FILE_SIZE_MB
+        value: "10"
+
+  - type: web
+    name: autoinspect-frontend
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: frontend/dist
+
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+
+  - type: keyvalue
+    name: autoinspect-redis
+    region: singapore
+    plan: free
+
+databases:
+  - name: autoinspect-db
+    region: singapore
+    plan: free
