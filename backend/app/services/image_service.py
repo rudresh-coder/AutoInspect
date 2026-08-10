@@ -1,5 +1,6 @@
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,6 +11,11 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.models.image import Image
+from backend.app.services.storage import (
+    delete_file,
+    r2_is_configured,
+    upload_file,
+)
 
 
 def validate_content_type(upload: UploadFile) -> None:
@@ -23,22 +29,26 @@ def validate_content_type(upload: UploadFile) -> None:
         )
 
 
-def save_upload_file(upload: UploadFile, processing_id: str) -> tuple[str, int]:
-    upload_directory = Path(settings.upload_dir)
-    upload_directory.mkdir(parents=True, exist_ok=True)
-
+def save_upload_file(
+    upload: UploadFile,
+    processing_id: str,
+) -> tuple[str, int]:
     extension = Path(upload.filename or "").suffix.lower()
 
     if not extension:
         extension = ".img"
 
-    filename = f"{processing_id}{extension}"
-    destination = upload_directory / filename
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=extension,
+    )
+
+    destination = Path(temp_file.name)
 
     total_size = 0
 
     try:
-        with destination.open("wb") as output_file:
+        with temp_file:
             while True:
                 chunk = upload.file.read(1024 * 1024)
 
@@ -47,23 +57,30 @@ def save_upload_file(upload: UploadFile, processing_id: str) -> tuple[str, int]:
 
                 total_size += len(chunk)
 
-                if total_size > settings.max_file_size_mb * 1024 * 1024:
-                    destination.unlink(missing_ok=True)
-
+                if (
+                    total_size
+                    > settings.max_file_size_mb * 1024 * 1024
+                ):
                     raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=(
+                            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+                        ),
                         detail={
                             "code": "IMAGE_TOO_LARGE",
                             "message": (
-                                f"Image exceeds the maximum allowed size "
-                                f"of {settings.max_file_size_mb} MB."
+                                f"Image exceeds the maximum allowed "
+                                f"size of "
+                                f"{settings.max_file_size_mb} MB."
                             ),
                         },
                     )
 
-                output_file.write(chunk)
+                temp_file.write(chunk)
+
+        return str(destination), total_size
 
     except HTTPException:
+        destination.unlink(missing_ok=True)
         raise
 
     except Exception as exc:
@@ -76,8 +93,6 @@ def save_upload_file(upload: UploadFile, processing_id: str) -> tuple[str, int]:
                 "message": "Unable to store uploaded image.",
             },
         ) from exc
-
-    return str(destination), total_size
 
 
 def inspect_image(
@@ -117,19 +132,45 @@ def create_image_record(
     db: Session,
     upload: UploadFile,
 ) -> Image:
-
     validate_content_type(upload)
 
     processing_id = str(uuid4())
 
-    storage_path, file_size = save_upload_file(
+    local_path, file_size = save_upload_file(
         upload,
         processing_id,
     )
 
+    extension = Path(
+        upload.filename or ""
+    ).suffix.lower()
+
+    if not extension:
+        extension = ".img"
+
+    object_key = (
+        f"images/{processing_id}{extension}"
+    )
+
+    uploaded_to_r2 = False
+
     try:
-        width, height, _ = inspect_image(storage_path)
-        sha256_hash = calculate_sha256(storage_path)
+        width, height, _ = inspect_image(local_path)
+        sha256_hash = calculate_sha256(local_path)
+
+        if r2_is_configured():
+            upload_file(
+                local_path=local_path,
+                object_key=object_key,
+                content_type=upload.content_type,
+            )
+
+            uploaded_to_r2 = True
+
+            storage_path = object_key
+
+        else:
+            storage_path = local_path
 
         image = Image(
             id=processing_id,
@@ -137,7 +178,10 @@ def create_image_record(
                 upload.filename or "unknown"
             ),
             storage_path=storage_path,
-            mime_type=upload.content_type or "application/octet-stream",
+            mime_type=(
+                upload.content_type
+                or "application/octet-stream"
+            ),
             file_size=file_size,
             width=width,
             height=height,
@@ -152,17 +196,28 @@ def create_image_record(
         return image
 
     except HTTPException:
-        os.unlink(storage_path)
+        if uploaded_to_r2:
+            delete_file(object_key)
+
         raise
 
     except Exception as exc:
         db.rollback()
-        os.unlink(storage_path)
+
+        if uploaded_to_r2:
+            delete_file(object_key)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "IMAGE_PROCESSING_FAILED",
-                "message": "Unable to process uploaded image metadata.",
+                "message": (
+                    "Unable to process uploaded "
+                    "image metadata."
+                ),
             },
         ) from exc
+
+    finally:
+        if r2_is_configured():
+            os.unlink(local_path)
