@@ -9,4 +9,4 @@ if __name__ == "__main__":
         connection=redis_connection,
     )
 
-    worker.work(with_scheduler=True)
+    worker.work(with_scheduler=False)
