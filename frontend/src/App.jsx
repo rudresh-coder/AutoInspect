@@ -60,7 +60,7 @@ function ProcessingState({
   )
 }
 
-function CompletedState({ result, imageUrl }) {
+function CompletedState({ result, imageUrl, onAnalyzeAnother }) {
   const analysis = result.analysis
 
   const score = analysis?.overall_score ?? 0
@@ -272,7 +272,7 @@ function CompletedState({ result, imageUrl }) {
         </p>
       </motion.div>
 
-      {/* Technical metadata */}
+           {/* Technical metadata */}
       <div className="technical-meta">
         <span>
           FILE <strong>{result.filename}</strong>
@@ -295,6 +295,16 @@ function CompletedState({ result, imageUrl }) {
         <span>
           STATUS <strong>COMPLETE</strong>
         </span>
+      </div>
+
+      <div className="report-actions">
+        <button
+          type="button"
+          className="analyze-another-button"
+          onClick={onAnalyzeAnother}
+        >
+          ANALYZE ANOTHER IMAGE
+        </button>
       </div>
     </motion.div>
   )
@@ -509,6 +519,7 @@ const handleFile = async (file) => {
   <CompletedState
   result={result}
   imageUrl={imageUrl}
+  onAnalyzeAnother={resetInspection}
 />
 ) : status === 'failed' ? (
   <div className="failure-state">

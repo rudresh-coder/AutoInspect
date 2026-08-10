@@ -1956,3 +1956,34 @@
   outline: 2px solid rgba(255, 255, 255, 0.45);
   outline-offset: 3px;
 }
+
+.report-actions {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.analyze-another-button {
+  padding: 12px 20px;
+  border: 1px solid #454b47;
+  background: transparent;
+  color: #dfe1dc;
+
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+
+  cursor: pointer;
+
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease;
+}
+
+.analyze-another-button:hover {
+  border-color: #d6a84f;
+  color: #d6a84f;
+  background: rgba(214, 168, 79, 0.05);
+}
