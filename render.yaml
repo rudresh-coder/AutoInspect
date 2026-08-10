@@ -5,7 +5,7 @@ services:
     plan: free
     region: singapore
 
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: pip install -r backend/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
     startCommand: bash start.sh
 
     healthCheckPath: /health
