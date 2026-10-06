@@ -34,10 +34,10 @@ def process_image(processing_id: str) -> None:
 
         original_storage_path = image.storage_path
 
-        # When using R2, download the image to a temporary
-        # local file because the analysis pipeline expects
-        # a filesystem path.
-        if r2_is_configured():
+        # When the stored path points at R2, download it to a
+        # temporary local file because the analysis pipeline
+        # expects a filesystem path.
+        if r2_is_configured() and not Path(original_storage_path).exists():
             suffix = Path(
                 original_storage_path
             ).suffix or ".img"

@@ -16,12 +16,17 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+DATABASE_URL = (
+    settings.sqlalchemy_database_url_unpooled
+    or settings.sqlalchemy_database_url
+)
+
 
 def run_migrations_offline() -> None:
     """Run migrations in offline mode."""
 
     context.configure(
-        url=settings.database_url,
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={
@@ -41,7 +46,7 @@ def run_migrations_online() -> None:
         {},
     )
 
-    configuration["sqlalchemy.url"] = settings.database_url
+    configuration["sqlalchemy.url"] = DATABASE_URL
 
     connectable = engine_from_config(
         configuration,

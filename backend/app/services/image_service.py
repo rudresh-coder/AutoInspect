@@ -159,15 +159,18 @@ def create_image_record(
         sha256_hash = calculate_sha256(local_path)
 
         if r2_is_configured():
-            upload_file(
-                local_path=local_path,
-                object_key=object_key,
-                content_type=upload.content_type,
-            )
+            try:
+                upload_file(
+                    local_path=local_path,
+                    object_key=object_key,
+                    content_type=upload.content_type,
+                )
 
-            uploaded_to_r2 = True
+                uploaded_to_r2 = True
+                storage_path = object_key
 
-            storage_path = object_key
+            except Exception:
+                storage_path = local_path
 
         else:
             storage_path = local_path
@@ -219,5 +222,5 @@ def create_image_record(
         ) from exc
 
     finally:
-        if r2_is_configured():
+        if uploaded_to_r2:
             os.unlink(local_path)

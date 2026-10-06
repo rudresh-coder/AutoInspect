@@ -7,11 +7,35 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:5173"
 
     database_url: str
+    database_url_unpooled: str | None = None
     redis_url: str
 
     @property
     def sqlalchemy_database_url(self) -> str:
         url = self.database_url
+
+        if url.startswith("postgres://"):
+            url = url.replace(
+                "postgres://",
+                "postgresql+psycopg://",
+                1,
+            )
+
+        elif url.startswith("postgresql://"):
+            url = url.replace(
+                "postgresql://",
+                "postgresql+psycopg://",
+                1,
+            )
+
+        return url
+
+    @property
+    def sqlalchemy_database_url_unpooled(self) -> str | None:
+        url = self.database_url_unpooled
+
+        if url is None:
+            return None
 
         if url.startswith("postgres://"):
             url = url.replace(

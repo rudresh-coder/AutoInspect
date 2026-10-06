@@ -754,10 +754,13 @@ AutoInspect uses environment variables for database, Redis, and Cloudflare R2 co
 
 Create a `.env` file in the project root based on `.env.example`.
 
+Use the pooled Neon `DATABASE_URL` for the API at runtime and `DATABASE_URL_UNPOOLED` for Alembic migrations and other schema jobs.
+
 Example:
 
 ```env
-DATABASE_URL=your_database_connection_string
+DATABASE_URL=your_neon_pooled_connection_string
+DATABASE_URL_UNPOOLED=your_neon_unpooled_connection_string
 REDIS_URL=your_redis_connection_string
 
 R2_ENDPOINT_URL=your_r2_endpoint_url
@@ -967,6 +970,12 @@ The React + Vite frontend is deployed as a Render Static Site:
 ```text
 https://autoinspect-frontend.onrender.com
 ```
+
+### Backend Database Cutover
+
+The backend API should use Neon Postgres for `DATABASE_URL` in the Render service environment.
+
+Use the pooled Neon connection string for the API runtime and keep the unpooled Neon connection string available only for migrations. The old Render Postgres resource should not be used once the Neon cutover is complete.
 # 25. Design Philosophy
 
 The assignment emphasizes thoughtful engineering over unnecessary complexity.

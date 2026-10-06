@@ -1,0 +1,39 @@
+{
+  "generatedAt": "2026-10-06T09:11:28Z",
+  "generatedOnPlatform": "win32",
+  "projectType": "webapp",
+  "devServer": {
+    "command": "npm",
+    "args": ["run", "dev"],
+    "url": "http://localhost:5173/",
+    "readyTimeoutSeconds": 120
+  },
+  "setup": [
+    {
+      "command": "npm",
+      "args": ["install"],
+      "timeoutSeconds": 600
+    }
+  ],
+  "assertions": [
+    {
+      "name": "build-app",
+      "kind": "process",
+      "command": "npm",
+      "args": ["run", "build"],
+      "verificationMethod": "exit-code",
+      "expected": "0",
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "dev-server-serves-home",
+      "kind": "http-probe",
+      "startCommand": "npm",
+      "startArgs": ["run", "dev"],
+      "url": "http://localhost:5173/",
+      "verificationMethod": "http-status",
+      "expected": "200",
+      "timeoutSeconds": 120
+    }
+  ]
+}
