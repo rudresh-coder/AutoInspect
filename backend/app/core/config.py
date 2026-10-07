@@ -1,6 +1,28 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _normalize_postgres_url(url: str, *, require_ssl: bool) -> str:
+    if url.startswith("postgres://"):
+        url = url.replace(
+            "postgres://",
+            "postgresql+psycopg://",
+            1,
+        )
+
+    elif url.startswith("postgresql://"):
+        url = url.replace(
+            "postgresql://",
+            "postgresql+psycopg://",
+            1,
+        )
+
+    if require_ssl and "sslmode=" not in url:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}sslmode=require"
+
+    return url
+
+
 class Settings(BaseSettings):
     app_name: str = "AutoInspect"
     app_env: str = "development"
@@ -12,23 +34,10 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_database_url(self) -> str:
-        url = self.database_url
-
-        if url.startswith("postgres://"):
-            url = url.replace(
-                "postgres://",
-                "postgresql+psycopg://",
-                1,
-            )
-
-        elif url.startswith("postgresql://"):
-            url = url.replace(
-                "postgresql://",
-                "postgresql+psycopg://",
-                1,
-            )
-
-        return url
+        return _normalize_postgres_url(
+            self.database_url,
+            require_ssl=self.app_env == "production",
+        )
 
     @property
     def sqlalchemy_database_url_unpooled(self) -> str | None:
@@ -37,21 +46,10 @@ class Settings(BaseSettings):
         if url is None:
             return None
 
-        if url.startswith("postgres://"):
-            url = url.replace(
-                "postgres://",
-                "postgresql+psycopg://",
-                1,
-            )
-
-        elif url.startswith("postgresql://"):
-            url = url.replace(
-                "postgresql://",
-                "postgresql+psycopg://",
-                1,
-            )
-
-        return url
+        return _normalize_postgres_url(
+            url,
+            require_ssl=self.app_env == "production",
+        )
 
     upload_dir: str = "./uploads"
     max_file_size_mb: int = 10

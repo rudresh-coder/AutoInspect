@@ -17,6 +17,7 @@ class ImageAnalysisResponse(BaseModel):
     plate_confidence: float | None
 
     exact_duplicate: bool
+    matched_image_id: str | None
     duplicate_similarity: float | None
 
     explanation: str | None

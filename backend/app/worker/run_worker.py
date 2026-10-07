@@ -1,11 +1,14 @@
 from rq import SimpleWorker
 
-from backend.app.worker.queue import redis_connection
+from backend.app.worker.queue import (
+    image_processing_queue,
+    redis_connection,
+)
 
 
 if __name__ == "__main__":
     worker = SimpleWorker(
-        ["image-processing"],
+        [image_processing_queue],
         connection=redis_connection,
     )
 

@@ -39,4 +39,5 @@ class Image(Base):
         back_populates="image",
         uselist=False,
         cascade="all, delete-orphan",
+        foreign_keys="ImageAnalysis.image_id",
     )

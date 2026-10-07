@@ -36,7 +36,7 @@ def run_analysis(db: Session, image: Image) -> ImageAnalysis:
     analysis.plate_text = ocr_result.plate_text
     analysis.plate_confidence = ocr_result.plate_confidence
     analysis.explanation = explanation
-    analysis.duplicate_detected = duplicate_result.exact_duplicate
+    analysis.exact_duplicate = duplicate_result.exact_duplicate
     analysis.duplicate_similarity = duplicate_result.duplicate_similarity
     analysis.matched_image_id = duplicate_result.matched_image_id
 

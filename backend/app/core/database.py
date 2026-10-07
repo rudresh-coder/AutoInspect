@@ -5,7 +5,8 @@ from backend.app.core.config import settings
 
 
 engine = create_engine(
-    settings.sqlalchemy_database_url,
+    settings.sqlalchemy_database_url_unpooled
+    or settings.sqlalchemy_database_url,
     pool_pre_ping=True,
 )
 

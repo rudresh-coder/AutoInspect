@@ -26,6 +26,32 @@ services:
       - key: MAX_FILE_SIZE_MB
         value: "10"
 
+  - type: worker
+    name: autoinspect-worker
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install --no-cache-dir torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cpu && pip install --no-cache-dir -r backend/requirements.txt
+    startCommand: python -m backend.app.worker.run_worker
+    envVars:
+      - key: APP_NAME
+        value: AutoInspect
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: autoinspect-redis
+          property: connectionString
+      - key: FRONTEND_URL
+        sync: false
+      - key: UPLOAD_DIR
+        value: ./uploads
+      - key: MAX_FILE_SIZE_MB
+        value: "10"
+
   - type: web
     name: autoinspect-frontend
     runtime: static

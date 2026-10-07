@@ -69,6 +69,12 @@ class ImageAnalysis(Base):
         default=False,
     )
 
+    matched_image_id: Mapped[str | None] = mapped_column(
+        ForeignKey("images.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     duplicate_similarity: Mapped[float | None] = mapped_column(
         Float,
         nullable=True,
@@ -95,4 +101,5 @@ class ImageAnalysis(Base):
     image = relationship(
         "Image",
         back_populates="analysis",
+        foreign_keys=[image_id],
     )
